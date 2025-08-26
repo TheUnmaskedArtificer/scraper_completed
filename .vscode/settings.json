@@ -1,4 +1,5 @@
 {
     "coderabbit.agentType": "Kilo Code",
-    "coderabbit.autoReviewMode": "auto"
+    "coderabbit.autoReviewMode": "auto",
+    "codechecker.editor.showDatabaseDialog": false
 }

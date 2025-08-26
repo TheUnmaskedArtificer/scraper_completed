@@ -237,6 +237,11 @@ class _ScraperDashboardState extends State<ScraperDashboard> {
             tooltip: 'Run',
           ),
           IconButton(
+            onPressed: _currentJob?.status == JobStatus.running ? _scrapingService.cancelJob : null,
+            icon: const Icon(Icons.stop),
+            tooltip: 'Cancel',
+          ),
+          IconButton(
             onPressed: _currentJob?.status == JobStatus.completed ? _downloadResults : null,
             icon: const Icon(Icons.download),
             tooltip: 'Download',

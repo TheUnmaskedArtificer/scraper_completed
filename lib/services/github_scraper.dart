@@ -164,6 +164,19 @@ class GitHubScraper {
           'pods/',
           'third_party/',
           'submodules/',
+          '.venv/',
+          '.env/',
+          '.tox/',
+          '.idea/',
+          '.vscode/',
+          'coverage/',
+          'out/',
+          'buck-out/',
+          'tmp/',
+          'temp/',
+          'logs/',
+          'fixtures/',
+          'examples/assets/',
         ];
 
         final filtered = tree
@@ -176,13 +189,45 @@ class GitHubScraper {
             .where((file) {
               final p = (file['path'] as String);
               final lower = p.toLowerCase();
+              final basename = lower.split('/').last;
+
+              // Exclude common heavy/noise directories
               if (excludes.any((ex) => lower.startsWith(ex) || lower.contains('/$ex'))) {
                 return false;
               }
+
+              // Exclude minified and map files
+              if (basename.endsWith('.min.js') || basename.endsWith('.map')) {
+                return false;
+              }
+
+              // Exclude lockfiles and dependency metadata
+              const lockNames = [
+                'package-lock.json',
+                'yarn.lock',
+                'pnpm-lock.yaml',
+                'cargo.lock',
+                'gemfile.lock',
+                'composer.lock',
+                'poetry.lock',
+                'pipfile.lock',
+                'go.sum',
+              ];
+              if (lockNames.contains(basename)) {
+                return false;
+              }
+
+              // Exclude large fixtures by path pattern (heuristic)
+              if (lower.contains('/fixtures/') &&
+                  (basename.endsWith('.json') || basename.endsWith('.ndjson'))) {
+                return false;
+              }
+
               final size = (file['size'] is int)
                   ? file['size'] as int
                   : int.tryParse('${file['size']}') ?? 0;
               if (size >= effectiveMaxBytes) return false;
+
               return _shouldIncludeFile(p, config);
             })
             .toList();
@@ -345,16 +390,22 @@ class GitHubScraper {
               addLog,
             );
             if (content != null) {
-              final page = ProcessedPage(
-                url: '$url/blob/$defaultBranch/${file["path"]}',
-                title: _getFileTitle(file["path"]),
-                content: _processContent(content, file["path"]),
-                headings: _extractMarkdownHeadings(content, file["path"]),
-              );
+              final processed = _processContent(content, file["path"]);
+              if (processed.trim().isEmpty) {
+                failedCount++;
+                addLog('Skipped empty content: ${file["path"]}');
+              } else {
+                final page = ProcessedPage(
+                  url: '$url/blob/$defaultBranch/${file["path"]}',
+                  title: _getFileTitle(file["path"]),
+                  content: processed,
+                  headings: _extractMarkdownHeadings(processed, file["path"]),
+                );
 
-              results.add(page);
-              processedCount++;
-              addLog('Processed: ${file["path"]}');
+                results.add(page);
+                processedCount++;
+                addLog('Processed: ${file["path"]}');
+              }
             } else {
               failedCount++;
               addLog('Failed to get content for: ${file["path"]}');
@@ -437,11 +488,30 @@ class GitHubScraper {
   bool _shouldIncludeFile(String path, GitHubConfig config) {
     final lowerPath = path.toLowerCase();
     final basename = lowerPath.split('/').last;
+    final baseNoExt = basename.replaceAll(RegExp(r'\.[^.]*$'), '');
+
+    // Exclude common noisy/minified artifacts early
+    const lockNames = [
+      'package-lock.json',
+      'yarn.lock',
+      'pnpm-lock.yaml',
+      'cargo.lock',
+      'gemfile.lock',
+      'composer.lock',
+      'poetry.lock',
+      'pipfile.lock',
+      'go.sum',
+    ];
+    if (lockNames.contains(basename)) return false;
+    if (basename.endsWith('.min.js') || basename.endsWith('.map')) return false;
+    if (lowerPath.contains('/fixtures/') &&
+        (basename.endsWith('.json') || basename.endsWith('.ndjson'))) {
+      return false;
+    }
 
     if (config.scope == GitHubScope.docsOnly) {
       // Always include key docs files regardless of extension
-      final docsNames = ['readme', 'changelog', 'license', 'licence', 'contributing'];
-      final baseNoExt = basename.replaceAll(RegExp(r'\.[^.]*$'), '');
+      const docsNames = ['readme', 'changelog', 'license', 'licence', 'contributing'];
       if (docsNames.contains(baseNoExt)) return true;
 
       // Include common docs locations and extensions
@@ -461,7 +531,7 @@ class GitHubScraper {
       return false;
     } else {
       // Full repo: include text files, exclude binaries via extension allowlist
-      final textExtensions = [
+      const textExtensions = [
         '.md',
         '.mdx',
         '.txt',
@@ -508,8 +578,7 @@ class GitHubScraper {
       ];
 
       // Also include key root files without extension changes (README, LICENSE, etc.)
-      final baseNoExt = basename.replaceAll(RegExp(r'\.[^.]*$'), '');
-      final keyDocs = ['readme', 'changelog', 'license', 'licence', 'contributing'];
+      const keyDocs = ['readme', 'changelog', 'license', 'licence', 'contributing'];
       if (keyDocs.contains(baseNoExt)) return true;
 
       return textExtensions.any((ext) => lowerPath.endsWith(ext));

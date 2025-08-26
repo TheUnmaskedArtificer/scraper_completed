@@ -10,17 +10,24 @@ class ScrapingService extends ChangeNotifier {
   ScrapingJob? _currentJob;
   final List<String> _logs = [];
   bool _cancelRequested = false;
-  
+
   final _websiteScraper = WebsiteScraper();
   final _githubScraper = GitHubScraper();
   final _exportService = ExportService();
+
+  // Throttled notifications for logs to reduce rebuild pressure
+  Timer? _logNotifyTimer;
+  DateTime _lastLogNotify = DateTime.fromMillisecondsSinceEpoch(0);
+  bool _logNotifyScheduled = false;
+
+  static const String _cancelledByUserMessage = 'Cancelled by user';
 
   ScrapingJob? get currentJob => _currentJob;
   List<String> get logs => List.unmodifiable(_logs);
 
   Future<Map<String, dynamic>> validateJob(ScrapingJob job) async {
     _addLog('Validating job...');
-    
+
     try {
       if (job.sourceType == SourceType.website) {
         return await _websiteScraper.validate(job);
@@ -42,13 +49,13 @@ class ScrapingService extends ChangeNotifier {
     _cancelRequested = false;
     _clearLogs();
     _addLog('Starting job: ${job.id}');
-    
+
     job.status = JobStatus.running;
     notifyListeners();
 
     try {
       List<ProcessedPage> results;
-      
+
       if (job.sourceType == SourceType.website) {
         results = await _websiteScraper.scrape(
           job,
@@ -66,15 +73,12 @@ class ScrapingService extends ChangeNotifier {
       }
 
       if (_cancelRequested) {
-        job.status = JobStatus.failed;
-        job.errorMessage = 'Cancelled by user';
-        _addLog('Job cancelled by user');
-        notifyListeners();
+        _markJobCancelled(job);
         return;
       }
 
       await _exportService.generateExports(job, results);
-      
+
       job.status = JobStatus.completed;
       _addLog('Job completed successfully');
     } catch (e) {
@@ -114,21 +118,50 @@ class ScrapingService extends ChangeNotifier {
     }
   }
 
+  void _markJobCancelled(ScrapingJob job) {
+    job.status = JobStatus.failed; // keep existing model semantics
+    job.errorMessage = _cancelledByUserMessage;
+    _addLog('Job cancelled by user');
+  }
+
   void _addLog(String message) {
     final timestamp = DateTime.now().toIso8601String();
     final logEntry = '[$timestamp] $message';
     _logs.add(logEntry);
-    
+
     // Keep only last 100 log entries
     if (_logs.length > 100) {
       _logs.removeAt(0);
     }
-    
+
     if (kDebugMode) {
       print(logEntry);
     }
-    
-    notifyListeners();
+
+    _scheduleLogNotify();
+  }
+
+  void _scheduleLogNotify() {
+    const intervalMs = 200; // coalesce UI updates ~5/sec
+    final now = DateTime.now();
+    final elapsed = now.difference(_lastLogNotify).inMilliseconds;
+
+    if (elapsed >= intervalMs) {
+      _lastLogNotify = now;
+      notifyListeners();
+      return;
+    }
+
+    if (_logNotifyScheduled) return;
+
+    _logNotifyScheduled = true;
+    final wait = Duration(milliseconds: intervalMs - elapsed);
+    _logNotifyTimer?.cancel();
+    _logNotifyTimer = Timer(wait, () {
+      _logNotifyScheduled = false;
+      _lastLogNotify = DateTime.now();
+      notifyListeners();
+    });
   }
 
   void _clearLogs() {
@@ -140,6 +173,7 @@ class ScrapingService extends ChangeNotifier {
   void dispose() {
     _websiteScraper.dispose();
     _githubScraper.dispose();
+    _logNotifyTimer?.cancel();
     super.dispose();
   }
 }
