@@ -93,7 +93,7 @@ class GitHubScraper {
       final seconds = int.tryParse(retryAfter);
       if (seconds != null) {
         final ms = seconds * 1000;
-        return ms.clamp(1000, 120000);
+        return ms.clamp(1000, 120000).toInt();
       }
     }
     final remaining = headers['x-ratelimit-remaining'];
@@ -103,13 +103,13 @@ class GitHubScraper {
       if (resetEpoch != null) {
         final nowSec = DateTime.now().millisecondsSinceEpoch ~/ 1000;
         final deltaMs = (resetEpoch - nowSec) * 1000;
-        if (deltaMs > 0) return deltaMs.clamp(1000, 300000);
+        if (deltaMs > 0) return deltaMs.clamp(1000, 300000).toInt();
       }
     }
     final base = 500 * (1 << (attempt - 1));
     final jitter = (base * 0.3).toInt();
     final ms = base + (jitter * ((attempt % 5) + 1));
-    return ms.clamp(500, 15000);
+    return ms.clamp(500, 15000).toInt();
   }
 
   Future<Map<String, dynamic>?> _getRepositoryInfoAuth(

@@ -212,6 +212,7 @@ class ExportService {
   }
 
   String _escapeHtml(String text) {
+    // Escape minimal HTML entities
     return text
         .replaceAll('&', '&')
         .replaceAll('<', '<')
