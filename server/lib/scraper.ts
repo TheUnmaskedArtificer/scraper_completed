@@ -1,7 +1,9 @@
 import path from 'path';
 import { promises as fs, existsSync, mkdirSync, statSync } from 'fs';
 import * as nodeFs from 'fs';
-import cheerio from 'cheerio';
+import { load } from 'cheerio';
+// ...
+const $ = load(html);
 import git from 'isomorphic-git';
 import http from 'isomorphic-git/http/node';
 import { globby } from 'globby';
